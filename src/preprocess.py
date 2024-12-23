@@ -2,7 +2,7 @@
 Preprocesses the data by extracting nouns and their articles from the long CSV file and writing them to a new, more manageable CSV file.
 """
 
-from nouns import Noun
+from src.nouns import Noun
 import csv
 
 
