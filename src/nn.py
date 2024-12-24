@@ -34,7 +34,7 @@ Dimensions:
 
 import torch
 from torch import nn
-from src.tokenizer import tokenizer, tokenize_text
+from src.tokenizer import tokenizer, tokenize_texts
 import math
 
 
@@ -72,25 +72,25 @@ class TransformerEncoder(nn.Module):
 
         self.dropout = nn.Dropout()
 
-    def forward(self, x: str) -> torch.Tensor:
-        # tokenize the text (also appends the cls token)
-        x = tokenize_text(x)
-
-        # add positional encodings
-        x = x + self.pos_encoding
+    def forward(self, x: list[str]) -> torch.Tensor:
+        # tokenize the texts (also appends the cls token)
+        x = tokenize_texts(x)
 
         # apply embedding
         x = self.embeddings(x)
 
+        # add positional encodings
+        x = x + self.pos_encoding[: x.shape[1]]
+
         # dropout
         x = self.dropout(x)
 
-        # apply attention blocks and add residual connection
+        # apply attention blocks
         for attn_block in self.layers:
-            x = attn_block(x) + x
+            x = attn_block(x)
 
         # extract the cls tokens
-        cls_tokens = x[:][-1]
+        cls_tokens = x[:, -1, :]
 
         # and apply the classification head
         logits = self.head(cls_tokens)
@@ -129,7 +129,7 @@ class AttentionBlock(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # apply each attention head and concatenate the output
-        attn = torch.concat([head(x) for head in self.heads], dim=1)
+        attn = torch.concat([head(x) for head in self.heads], dim=2)
         attn = self.attn_lin(attn)
         attn = self.dropout(attn)
 

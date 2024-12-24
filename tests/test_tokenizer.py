@@ -40,6 +40,8 @@ def test_batch_tokenization():
     assert len(tokenized.shape) == 2
     assert tokenized.shape[0] == len(texts)
 
+    print(f"Original texts: {texts}\nTokenized texts: {tokenized}")
+
     # All sequences should have same length (padding)
     assert all(len(seq) == len(tokenized[0]) for seq in tokenized)
 
