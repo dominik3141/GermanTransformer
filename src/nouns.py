@@ -6,6 +6,8 @@ import csv
 from torch.utils.data import Dataset, DataLoader, random_split
 from typing import Optional, Tuple
 import torch
+import configparser
+from src.tokenizer import tokenizer
 
 
 class Noun:
@@ -28,10 +30,27 @@ class Noun:
 
 
 def load_nouns_from_csv(path: str) -> list[Noun]:
-    """Load nouns from a csv file"""
+    """
+    Load nouns from a csv file, skipping those that would exceed the maximum sequence length
+    when tokenized. Returns only the nouns that fit within the length constraint.
+    """
+    # Read max sequence length from config
+    config = configparser.ConfigParser()
+    config.read("default.conf")
+    max_sequence_length = int(config["MODEL"]["max_sequence_length"])
+
+    valid_nouns: list[Noun] = []
+
     with open(path, "r") as file:
         reader = csv.reader(file)
-        return [Noun(*row) for row in reader]
+        for row in reader:
+            # Get token count for the word
+            token_count = len(tokenizer.encode(row[0])) + 1  # +1 for CLS token
+
+            if token_count <= max_sequence_length:
+                valid_nouns.append(Noun(*row))
+
+    return valid_nouns
 
 
 class NounDataset(Dataset):
