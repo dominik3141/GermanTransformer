@@ -39,3 +39,16 @@ def test_load_nouns_respects_max_length():
         assert (
             token_count <= max_sequence_length
         ), f"Noun '{noun.word}' exceeds max length"
+
+
+def test_valid_article():
+    """Check that all articles are either m, f, or n"""
+
+    nouns = load_nouns_from_csv("data/nouns_clean.csv")
+
+    for noun in nouns:
+        assert noun.article in [
+            "m",
+            "f",
+            "n",
+        ], f"Invalid article: {noun.article} for word: {noun.word}"

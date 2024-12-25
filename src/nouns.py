@@ -43,6 +43,9 @@ def load_nouns_from_csv(path: str) -> list[Noun]:
 
     with open(path, "r") as file:
         reader = csv.reader(file)
+        # ignore header
+        next(reader)
+
         for row in reader:
             # Get token count for the word
             token_count = len(tokenizer.encode(row[0])) + 1  # +1 for CLS token
