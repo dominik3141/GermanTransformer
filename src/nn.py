@@ -76,6 +76,9 @@ class TransformerEncoder(nn.Module):
         # tokenize the texts (also appends the cls token)
         x = tokenize_texts(x)
 
+        # move to the same device as the model
+        x = x.to(next(self.parameters()).device)
+
         # apply embedding
         x = self.embeddings(x)
 

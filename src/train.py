@@ -7,6 +7,7 @@ import torch
 from torch import nn
 from src.nn import TransformerEncoder
 from src.nouns import load_nouns_from_csv, create_train_val_dataloaders
+import wandb
 
 config = configparser.ConfigParser()
 config.read("default.conf")
@@ -37,12 +38,24 @@ def train(test: bool = False):
     )
 
     # Initialize model, loss function, and optimizer
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps")
     model = TransformerEncoder(**model_params).to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(
         model.parameters(), lr=learning_rate, weight_decay=weight_decay
     )
+
+    if not test:
+        wandb.init(
+            project="german-articles",
+            config={
+                **model_params,
+                "batch_size": batch_size,
+                "learning_rate": learning_rate,
+                "weight_decay": weight_decay,
+                "epochs": epochs,
+            },
+        )
 
     # Training loop
     for epoch in range(epochs):
@@ -60,8 +73,10 @@ def train(test: bool = False):
 
             loss.backward()
 
-            # print the loss
-            print(f"Loss: {loss.item()}")
+            if test:
+                # print the loss
+                print(f"Loss: {loss.item()}")
+
             optimizer.step()
 
             train_loss += loss.item()
@@ -86,21 +101,38 @@ def train(test: bool = False):
                 val_total += labels.size(0)
                 val_correct += predicted.eq(labels).sum().item()
 
-        # Print epoch statistics
+        # Print and log epoch statistics
+        train_metrics = {
+            "train/loss": train_loss / len(train_loader),
+            "train/accuracy": 100.0 * train_correct / train_total,
+            "val/loss": val_loss / len(val_loader),
+            "val/accuracy": 100.0 * val_correct / val_total,
+            "epoch": epoch + 1,
+        }
+
         print(f"Epoch [{epoch+1}/{epochs}]")
         print(
-            f"Train Loss: {train_loss/len(train_loader):.4f}, "
-            f"Train Acc: {100.*train_correct/train_total:.2f}%"
+            f"Train Loss: {train_metrics['train/loss']:.4f}, "
+            f"Train Acc: {train_metrics['train/accuracy']:.2f}%"
         )
         print(
-            f"Val Loss: {val_loss/len(val_loader):.4f}, "
-            f"Val Acc: {100.*val_correct/val_total:.2f}%"
+            f"Val Loss: {train_metrics['val/loss']:.4f}, "
+            f"Val Acc: {train_metrics['val/accuracy']:.2f}%"
         )
+
+        if not test:
+            wandb.log(train_metrics)
+            # Save model with wandb
+            torch.save(model.state_dict(), f"checkpoints/model_epoch_{epoch}.pth")
+            wandb.save(f"checkpoints/model_epoch_{epoch}.pth")
 
         # if test, break after first epoch
         if test:
             break
 
-        if not test:
-            # Save model
-            torch.save(model.state_dict(), f"checkpoints/model_epoch_{epoch}.pth")
+    if not test:
+        wandb.finish()
+
+
+if __name__ == "__main__":
+    train(test=True)
