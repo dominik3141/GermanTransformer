@@ -1,6 +1,6 @@
 from src.nouns import load_nouns_from_csv, create_train_val_dataloaders
 import random
-from src.tokenizer import tokenizer
+from src.tokenizer import tokenize_texts
 import configparser
 
 
@@ -35,7 +35,9 @@ def test_load_nouns_respects_max_length():
     nouns = load_nouns_from_csv("data/nouns_clean.csv")
 
     for noun in nouns:
-        token_count = len(tokenizer.encode(noun.word)) + 1  # +1 for CLS token
+        token_count = (
+            len(tokenize_texts([noun.word])[0]) - 1
+        )  # -1 because we don't count CLS token
         assert (
             token_count <= max_sequence_length
         ), f"Noun '{noun.word}' exceeds max length"

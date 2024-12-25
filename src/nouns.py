@@ -7,7 +7,7 @@ from torch.utils.data import Dataset, DataLoader, random_split
 from typing import Optional, Tuple
 import torch
 import configparser
-from src.tokenizer import tokenizer
+from src.tokenizer import tokenize_texts
 
 
 class Noun:
@@ -48,7 +48,9 @@ def load_nouns_from_csv(path: str) -> list[Noun]:
 
         for row in reader:
             # Get token count for the word
-            token_count = len(tokenizer.encode(row[0])) + 1  # +1 for CLS token
+            token_count = (
+                len(tokenize_texts([row[0]])[0]) - 1
+            )  # -1 because we don't count CLS token here
 
             if token_count <= max_sequence_length:
                 valid_nouns.append(Noun(*row))

@@ -1,70 +1,68 @@
 """
-Tokenizes text strings into tensors.
-We will use the BERT tokenizer for now (our task is quite similar to the one in the BERT paper).
+A minimal character-level tokenizer.
 """
 
-from transformers import AutoTokenizer
 import torch
-
-# Load the tokenizer
-tokenizer = AutoTokenizer.from_pretrained(
-    "bert-base-uncased"
-)  # not sure if we shouldn't better use the cased version instead
+from typing import Dict, List
 
 
-def tokenize_texts(texts: list[str]) -> torch.Tensor:
-    """
-    Batch tokenizes text strings into a padded tensor.
-    Each sequence will have a CLS token appended at the end.
-    """
-    # Tokenize all texts at once - this is more efficient than doing it one by one
-    tokenized = tokenizer(
-        texts,
-        return_tensors="pt",
-        padding=True,  # Enable padding for batch processing
-        truncation=False,
-    )["input_ids"]  # Shape: [batch_size, max_seq_len]
+class CharVocab:
+    def __init__(self) -> None:
+        self.pad_token = "<pad>"
+        self.cls_token = "<cls>"
 
-    # Remove the batch-added CLS tokens (first position)
-    tokenized = tokenized[:, 1:]
+        # Create vocabulary (ASCII printable chars + special tokens)
+        chars = [chr(i) for i in range(32, 127)]  # printable ASCII
+        special_tokens = [self.pad_token, self.cls_token]
+        self.char_to_id: Dict[str, int] = {
+            char: idx for idx, char in enumerate(special_tokens + chars)
+        }
+        self.id_to_char: Dict[int, str] = {
+            idx: char for char, idx in self.char_to_id.items()
+        }
 
-    # Add CLS tokens at the end of each sequence
-    batch_cls = torch.full(
-        (len(texts), 1), tokenizer.cls_token_id, device=tokenized.device
-    )
-    tokenized_with_cls = torch.cat([tokenized, batch_cls], dim=1)
-
-    return tokenized_with_cls
+        self.cls_token_id = self.char_to_id[self.cls_token]
+        self.pad_token_id = self.char_to_id[self.pad_token]
+        self.vocab_size = len(self.char_to_id)
 
 
-def detokenize_texts(token_ids: torch.Tensor) -> list[str]:
-    """
-    Converts batched token IDs back into text strings.
-    Removes the CLS token from the end of each sequence.
-    """
-    # Remove CLS tokens from the end
-    tokens_without_cls = token_ids[:, :-1]
+# Global tokenizer instance
+tokenizer = CharVocab()
 
-    # Convert to list of lists for the tokenizer
-    token_lists = tokens_without_cls.tolist()
 
-    # Decode all sequences at once
-    texts = tokenizer.batch_decode(
-        token_lists,
-        skip_special_tokens=True,  # Remove any remaining special tokens
-        clean_up_tokenization_spaces=True,  # Clean up spaces around punctuation
-    )
+def tokenize_texts(texts: List[str]) -> torch.Tensor:
+    """Batch tokenizes text strings into a padded tensor with CLS token at the end."""
+    # Convert each text to character indices
+    sequences = [
+        [tokenizer.char_to_id.get(c, tokenizer.pad_token_id) for c in text]
+        for text in texts
+    ]
 
+    # Find max length and pad sequences
+    max_len = max(len(seq) for seq in sequences)
+    padded = [
+        seq + [tokenizer.pad_token_id] * (max_len - len(seq)) + [tokenizer.cls_token_id]
+        for seq in sequences
+    ]
+
+    return torch.tensor(padded)
+
+
+def detokenize_texts(token_ids: torch.Tensor) -> List[str]:
+    """Converts batched token IDs back into text strings."""
+    texts = []
+    for seq in token_ids.tolist():
+        # Remove CLS token and any padding
+        valid_ids = [id for id in seq[:-1] if id != tokenizer.pad_token_id]
+        text = "".join(tokenizer.id_to_char[id] for id in valid_ids)
+        texts.append(text)
     return texts
 
 
 if __name__ == "__main__":
-    print(
-        f"The CLS token is: {tokenizer.cls_token}, its ID is: {tokenizer.cls_token_id}"
-    )
-
-    text = "The quick brown fox jumps over the lazy dog."
+    text = "Hello, World!"
     tokenized = tokenize_texts([text])
     decoded = detokenize_texts(tokenized)
     print(f"Original: {text}")
+    print(f"Tokenized: {tokenized}")
     print(f"Decoded:  {decoded[0]}")
