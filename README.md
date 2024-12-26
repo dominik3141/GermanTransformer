@@ -1,7 +1,9 @@
 # GermanTransformer
 A transformer model to predict the articles of German nouns.
 
-![illustration](illustration.jpg)
+<p align="center">
+  <img src="illustration.jpg" width="400" alt="illustration">
+</p>
 
 ## Primary objective
 We build a BERT-like transformer model to predict the correct articles of German nouns.
