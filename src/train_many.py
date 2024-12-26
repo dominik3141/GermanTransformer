@@ -3,18 +3,22 @@ We train mutliple models of different sizes and see how they perform.
 
 We want to test the following models:
 Name, Layers, Heads, d_model
-tiny-a, 2, 2, 512
-tiny-b, 2, 2, 1024
-tiny-c, 2, 2, 2048
-small-a, 4, 4, 512
-small-b, 4, 4, 1024
-small-c, 4, 4, 2048
-medium-a, 8, 8, 512
-medium-b, 8, 8, 1024
-medium-c, 8, 8, 2048
-large-a, 16, 16, 512
-large-b, 16, 16, 1024
-large-c, 16, 16, 2048
+tiny-a, 2, 2, 256
+tiny-b, 2, 2, 512
+tiny-c, 2, 2, 1024
+tiny-d, 2, 2, 2048
+small-a, 4, 4, 256
+small-b, 4, 4, 512
+small-c, 4, 4, 1024
+small-d, 4, 4, 2048
+medium-a, 8, 8, 256
+medium-b, 8, 8, 512
+medium-c, 8, 8, 1024
+medium-d, 8, 8, 2048
+large-a, 16, 16, 256
+large-b, 16, 16, 512
+large-c, 16, 16, 1024
+large-d, 16, 16, 2048
 
 Batch size will be decided automatically to choose the largest batch size that fits in memory.
 Learning rate will be dependent on the batch size. So far a learning rate of 0.000005 works well for a batch size of 64.
@@ -127,32 +131,62 @@ def train_models() -> None:
         print(f"Training model: {config.name}")
         print(f"{'='*50}")
 
-        try:
-            batch_size = get_max_batch_size(config)
-            learning_rate = base_lr * batch_size
+        batch_size = get_max_batch_size(config)
+        learning_rate = base_lr * batch_size
 
-            train(
-                model_name=config.name,
-                num_layers=config.num_layers,
-                num_heads=config.num_heads,
-                d_model=config.d_model,
-                batch_size=batch_size,
-                learning_rate=learning_rate,
-                max_epochs=max_epochs,
-                nouns_path=nouns_path,
-                dropout_rate=dropout_rate,
-                patience=patience,
-                min_delta=min_delta,
-            )
-        except Exception as e:
-            error_msg = str(e)
-            print(f"\nFAILED to train model {config.name}:")
-            print(f"Error: {error_msg}")
+        while batch_size >= 1:
+            try:
+                train(
+                    model_name=config.name,
+                    num_layers=config.num_layers,
+                    num_heads=config.num_heads,
+                    d_model=config.d_model,
+                    batch_size=batch_size,
+                    learning_rate=learning_rate,
+                    max_epochs=max_epochs,
+                    nouns_path=nouns_path,
+                    dropout_rate=dropout_rate,
+                    patience=patience,
+                    min_delta=min_delta,
+                )
+                # If training succeeds, break the retry loop
+                break
+
+            except RuntimeError as e:
+                if "out of memory" in str(e):
+                    print(
+                        f"\nOut of memory with batch size {batch_size}, retrying with smaller batch..."
+                    )
+                    # Clean up wandb run if it exists
+                    if wandb.run is not None:
+                        wandb.finish(exit_code=1, status="failed")
+                    # Reduce batch size and learning rate proportionally
+                    batch_size //= 2
+                    learning_rate = base_lr * batch_size
+                    torch.cuda.empty_cache()
+                    continue
+                # If it's not a memory error, treat as a regular failure
+                error_msg = str(e)
+                print(f"\nFAILED to train model {config.name}:")
+                print(f"Error: {error_msg}")
+                failed_models.append((config.name, error_msg))
+                if wandb.run is not None:
+                    wandb.finish(exit_code=1, status="failed")
+                break
+            except Exception as e:
+                # Handle other exceptions as before
+                error_msg = str(e)
+                print(f"\nFAILED to train model {config.name}:")
+                print(f"Error: {error_msg}")
+                failed_models.append((config.name, error_msg))
+                if wandb.run is not None:
+                    wandb.finish(exit_code=1, status="failed")
+                break
+
+        # If we exhausted all batch sizes, add to failed models
+        if batch_size < 1:
+            error_msg = "Failed to find working batch size"
             failed_models.append((config.name, error_msg))
-            # Ensure wandb run is finished if it was started
-            if wandb.run is not None:
-                wandb.finish()
-            continue
 
     if failed_models:
         print("\n\nSummary of failed models:")
