@@ -121,7 +121,7 @@ def get_learning_rate(
     Uses linear scaling for batch size and square root scaling for parameters.
     """
     base_batch_size = 64
-    base_params = 2_000_000  # 2M parameters as reference
+    base_params = 5_000_000  # 5M parameters as reference
 
     # Linear scaling with batch size, square root scaling with parameters
     batch_scale = batch_size / base_batch_size
@@ -139,12 +139,18 @@ def train_models() -> None:
         ModelConfig("small-a", 4, 4, 512),
         ModelConfig("small-b", 4, 4, 1024),
         ModelConfig("small-c", 4, 4, 2048),
-        ModelConfig("medium-a", 8, 8, 512),
-        ModelConfig("medium-b", 8, 8, 1024),
-        ModelConfig("medium-c", 8, 8, 2048),
-        ModelConfig("large-a", 16, 16, 512),
-        ModelConfig("large-b", 16, 16, 1024),
-        ModelConfig("large-c", 16, 16, 2048),
+        ModelConfig("special-a", 32, 4, 32),
+        ModelConfig("special-b", 32, 4, 64),
+        ModelConfig("special-c", 32, 4, 128),
+        ModelConfig("special-d", 32, 4, 256),
+        ModelConfig("special-e", 32, 4, 512),
+        ModelConfig("special-f", 32, 4, 1024),
+        ModelConfig("medium-a", 8, 4, 512),
+        ModelConfig("medium-b", 8, 4, 1024),
+        ModelConfig("medium-c", 8, 4, 2048),
+        ModelConfig("large-a", 16, 4, 512),
+        ModelConfig("large-b", 16, 4, 1024),
+        ModelConfig("large-c", 16, 4, 2048),
     ]
 
     config = configparser.ConfigParser()
@@ -196,10 +202,10 @@ def train_models() -> None:
                     )
                     # Clean up wandb run if it exists
                     if wandb.run is not None:
-                        wandb.finish(exit_code=1, status="failed")
+                        wandb.finish(exit_code=1)
                     # Reduce batch size and learning rate proportionally
                     batch_size //= 2
-                    learning_rate = base_lr * batch_size
+                    learning_rate = get_learning_rate(config, batch_size, n_params)
                     torch.cuda.empty_cache()
                     continue
                 # If it's not a memory error, treat as a regular failure
@@ -208,16 +214,15 @@ def train_models() -> None:
                 print(f"Error: {error_msg}")
                 failed_models.append((config.name, error_msg))
                 if wandb.run is not None:
-                    wandb.finish(exit_code=1, status="failed")
+                    wandb.finish(exit_code=1)
                 break
             except Exception as e:
-                # Handle other exceptions as before
                 error_msg = str(e)
                 print(f"\nFAILED to train model {config.name}:")
                 print(f"Error: {error_msg}")
                 failed_models.append((config.name, error_msg))
                 if wandb.run is not None:
-                    wandb.finish(exit_code=1, status="failed")
+                    wandb.finish(exit_code=1)
                 break
 
         # If we exhausted all batch sizes, add to failed models

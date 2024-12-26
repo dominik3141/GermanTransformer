@@ -175,8 +175,8 @@ def train(
             train_total += labels.size(0)
             train_correct += predicted.eq(labels).sum().item()
 
-            # Evaluate Nutella every 50 batches
-            if batch_count % 50 == 0:
+            # Evaluate Nutella every 10 batches
+            if batch_count % 10 == 0:
                 model.eval()
                 with torch.no_grad():
                     nutella_word = ["Nutella"]
