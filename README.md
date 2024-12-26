@@ -24,5 +24,8 @@ Most models have been trained using 82,825 examples and have been validated on 9
 ### Details
 All raw results and model checkpoints can be found in the public [Weights and Biases project](https://wandb.ai/dominik-farr/german-articles/overview).
 
+### Further work
+A paper will be published as soon as there is a Devin-like system that simulates a grad-student that can do all the LaTeX/documentation/writing work that I don't really feel like doing.
+
 [^1]: Named 'small-a', 12,654,595 parameters, d_model=512, num_layers=4, num_heads=4
 [^2]: Named 'special-a', 406,659 parameters, d_model=32, num_layers=32, num_heads=4
