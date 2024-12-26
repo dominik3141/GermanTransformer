@@ -46,6 +46,7 @@ class TransformerEncoder(nn.Module):
         num_heads: int,
         num_layers: int,
         num_classes: int,
+        dropout_rate: float,
     ):
         super().__init__()
         self.max_sequence_length = max_sequence_length
@@ -53,24 +54,39 @@ class TransformerEncoder(nn.Module):
         self.num_heads = num_heads
         self.num_layers = num_layers
         self.num_classes = num_classes
+        self.dropout_rate = dropout_rate
 
-        # A learnable parameter for the positional encoding
-        self.pos_encoding = nn.Parameter(torch.zeros(max_sequence_length, d_model))
-        # Initialize the positional encoding with a small random value
-        nn.init.normal_(self.pos_encoding, mean=0, std=0.02)
+        # Add sinusoidal positional encoding
+        self.register_buffer(
+            "pos_encoding",
+            self._create_sinusoidal_encoding(max_sequence_length, d_model),
+        )
 
         # the embeddings for each token
         self.embeddings = nn.Embedding(tokenizer.vocab_size, d_model)
 
         # initialize the transformers layers
         self.layers = nn.ModuleList(
-            [AttentionBlock(d_model, num_heads) for _ in range(num_layers)]
+            [
+                AttentionBlock(d_model, num_heads, dropout_rate)
+                for _ in range(num_layers)
+            ]
         )
 
         # and finally a classification head
         self.head = nn.Linear(d_model, num_classes)
 
-        self.dropout = nn.Dropout()
+        self.dropout = nn.Dropout(dropout_rate)
+
+    def _create_sinusoidal_encoding(self, max_len: int, d_model: int) -> torch.Tensor:
+        position = torch.arange(max_len).unsqueeze(1)
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model)
+        )
+        pos_encoding = torch.zeros(max_len, d_model)
+        pos_encoding[:, 0::2] = torch.sin(position * div_term)
+        pos_encoding[:, 1::2] = torch.cos(position * div_term)
+        return pos_encoding
 
     def forward(self, x: list[str]) -> torch.Tensor:
         # tokenize the texts (also appends the cls token)
@@ -103,13 +119,13 @@ class TransformerEncoder(nn.Module):
 
 
 class AttentionBlock(nn.Module):
-    def __init__(self, d_model: int, num_heads: int):
+    def __init__(self, d_model: int, num_heads: int, dropout_rate: float):
         super().__init__()
 
         self.d_model = d_model
         self.num_heads = num_heads
         self.d_k = self.d_model // self.num_heads
-
+        self.dropout_rate = dropout_rate
         # create the attention heads
         self.heads = nn.ModuleList(
             [AttentionHead(d_model, self.d_k) for _ in range(num_heads)]
@@ -128,7 +144,7 @@ class AttentionBlock(nn.Module):
         )
 
         # Dropout layers
-        self.dropout = nn.Dropout()  # default dropout prop is 0.5
+        self.dropout = nn.Dropout(dropout_rate)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # apply each attention head and concatenate the output

@@ -8,12 +8,13 @@ from torch import nn
 from src.nn import TransformerEncoder
 from src.nouns import load_nouns_from_csv, create_train_val_dataloaders
 import wandb
+import time
 
 config = configparser.ConfigParser()
 config.read("default.conf")
 
 
-def train(test: bool = False):
+def train(test: bool = False, debug: bool = False):
     """Trains the transformer model on German noun article classification"""
 
     # Model parameters
@@ -30,6 +31,7 @@ def train(test: bool = False):
     learning_rate = float(config["TRAINING"]["learning_rate"])
     weight_decay = float(config["TRAINING"]["weight_decay"])
     epochs = int(config["TRAINING"]["epochs"])
+    dropout_rate = float(config["TRAINING"]["dropout_rate"])
 
     # Load and split data
     nouns = load_nouns_from_csv(config["DATA"]["nouns_path"])
@@ -39,7 +41,7 @@ def train(test: bool = False):
 
     # Initialize model, loss function, and optimizer
     device = torch.device("cuda" if torch.cuda.is_available() else "mps")
-    model = TransformerEncoder(**model_params).to(device)
+    model = TransformerEncoder(**model_params, dropout_rate=dropout_rate).to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(
         model.parameters(), lr=learning_rate, weight_decay=weight_decay
@@ -54,8 +56,12 @@ def train(test: bool = False):
                 "learning_rate": learning_rate,
                 "weight_decay": weight_decay,
                 "epochs": epochs,
+                "dropout_rate": dropout_rate,
             },
         )
+
+        # Log all model parameters every 50 steps
+        wandb.watch(model, log="all", log_freq=50)
 
     # Training loop
     for epoch in range(epochs):
@@ -64,6 +70,12 @@ def train(test: bool = False):
         train_correct = 0
         train_total = 0
 
+        # Add timing metrics
+        batch_times = []
+        epoch_start = time.time()
+        batch_start = time.time()
+        batch_count = 0
+
         for words, labels in train_loader:
             labels = labels.to(device)
             optimizer.zero_grad()
@@ -71,18 +83,81 @@ def train(test: bool = False):
             outputs = model(words)
             loss = criterion(outputs, labels)
 
+            # the model already outputs probabilities
+            probabilities = outputs
+
+            # Calculate prediction confidence and diversity
+            batch_confidence = torch.mean(torch.max(probabilities, dim=1)[0]).item()
+
+            # Calculate prediction diversity (std dev across batch for each class)
+            pred_diversity = torch.std(probabilities, dim=0).mean().item()
+
+            if debug:
+                random_idx = torch.randint(0, len(words), (1,)).item()
+                probs = outputs[random_idx].detach().cpu().numpy()
+                word = words[random_idx]
+                true_label = labels[random_idx].item()
+                print("\nDebug - Random sample:")
+                print(f"Word: {word}")
+                print(f"True label: {['m', 'f', 'n'][true_label]}")
+                print("Probabilities:")
+                print(f"  masculine: {probs[0]:.4f}")
+                print(f"  feminine: {probs[1]:.4f}")
+                print(f"  neuter: {probs[2]:.4f}")
+                print("-" * 40)
+
             loss.backward()
 
+            if not test:
+                wandb.log(
+                    {
+                        "train/loss": loss.item(),
+                        "train/prediction_confidence": batch_confidence,
+                        "train/prediction_diversity": pred_diversity,
+                    }
+                )
+
             if test:
-                # print the loss
-                print(f"Loss: {loss.item()}")
+                print(f"Train Loss: {loss.item():.4f}")
+                print(f"Batch confidence: {batch_confidence:.4f}")
+                print(f"Prediction diversity: {pred_diversity:.4f}")
 
             optimizer.step()
+
+            # Calculate throughput every 20 batches
+            batch_count += 1
+            if batch_count % 20 == 0:
+                batch_end = time.time()
+                time_for_20_batches = batch_end - batch_start
+                batch_times.append(
+                    time_for_20_batches / 20
+                )  # Add average time per batch
+
+                if not test:
+                    wandb.log(
+                        {
+                            "performance/batches_per_minute": (20 * 60.0)
+                            / time_for_20_batches,
+                            "performance/samples_per_minute": (20 * batch_size * 60.0)
+                            / time_for_20_batches,
+                        }
+                    )
+                batch_start = time.time()  # Reset timer for next 20 batches
 
             train_loss += loss.item()
             _, predicted = outputs.max(1)
             train_total += labels.size(0)
             train_correct += predicted.eq(labels).sum().item()
+
+        # Calculate epoch-level performance metrics
+        epoch_time = time.time() - epoch_start
+        avg_batch_time = sum(batch_times) / len(batch_times)
+
+        performance_metrics = {
+            "performance/epoch_time": epoch_time,
+            "performance/avg_batches_per_minute": 60.0 / avg_batch_time,
+            "performance/avg_samples_per_minute": (batch_size * 60.0) / avg_batch_time,
+        }
 
         # Validation
         model.eval()
@@ -96,10 +171,23 @@ def train(test: bool = False):
                 outputs = model(words)
                 loss = criterion(outputs, labels)
 
+                # Calculate validation confidence and diversity
+                probabilities = torch.softmax(outputs, dim=1)
+                batch_confidence = torch.mean(torch.max(probabilities, dim=1)[0]).item()
+                pred_diversity = torch.std(probabilities, dim=0).mean().item()
+
                 val_loss += loss.item()
                 _, predicted = outputs.max(1)
                 val_total += labels.size(0)
                 val_correct += predicted.eq(labels).sum().item()
+
+                if not test:
+                    wandb.log(
+                        {
+                            "val/prediction_confidence": batch_confidence,
+                            "val/prediction_diversity": pred_diversity,
+                        }
+                    )
 
         # Print and log epoch statistics
         train_metrics = {
@@ -121,7 +209,7 @@ def train(test: bool = False):
         )
 
         if not test:
-            wandb.log(train_metrics)
+            wandb.log({**train_metrics, **performance_metrics})
             # Save model with wandb
             torch.save(model.state_dict(), f"checkpoints/model_epoch_{epoch}.pth")
             wandb.save(f"checkpoints/model_epoch_{epoch}.pth")
@@ -135,4 +223,4 @@ def train(test: bool = False):
 
 
 if __name__ == "__main__":
-    train(test=True)
+    train(debug=True)
