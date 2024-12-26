@@ -210,13 +210,20 @@ def train(
 
         # Calculate epoch-level performance metrics
         epoch_time = time.time() - epoch_start
-        avg_batch_time = sum(batch_times) / len(batch_times)
-
         performance_metrics = {
             "performance/epoch_time": epoch_time,
-            "performance/avg_batches_per_minute": 60.0 / avg_batch_time,
-            "performance/avg_samples_per_minute": (batch_size * 60.0) / avg_batch_time,
         }
+
+        # Only calculate batch averages if we have processed any batches
+        if batch_times:
+            avg_batch_time = sum(batch_times) / len(batch_times)
+            performance_metrics.update(
+                {
+                    "performance/avg_batches_per_minute": 60.0 / avg_batch_time,
+                    "performance/avg_samples_per_minute": (batch_size * 60.0)
+                    / avg_batch_time,
+                }
+            )
 
         # Validation
         model.eval()

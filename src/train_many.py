@@ -33,6 +33,7 @@ from src.nn import TransformerEncoder
 import configparser
 import wandb
 import math
+import traceback
 
 
 @dataclass
@@ -210,19 +211,22 @@ def train_models() -> None:
                     learning_rate = get_learning_rate(config, batch_size, n_params)
                     torch.cuda.empty_cache()
                     continue
-                # If it's not a memory error, treat as a regular failure
-                error_msg = str(e)
-                print(f"\nFAILED to train model {config.name}:")
-                print(f"Error: {error_msg}")
-                failed_models.append((config.name, error_msg))
+                # For non-memory RuntimeErrors, show traceback and record failure
+                error_msg = (
+                    f"\nFAILED to train model {config.name}:\n{traceback.format_exc()}"
+                )
+                print(error_msg)
+                failed_models.append((config.name, str(e)))
                 if wandb.run is not None:
                     wandb.finish(exit_code=1)
                 break
             except Exception as e:
-                error_msg = str(e)
-                print(f"\nFAILED to train model {config.name}:")
-                print(f"Error: {error_msg}")
-                failed_models.append((config.name, error_msg))
+                # For all other exceptions, show traceback and record failure
+                error_msg = (
+                    f"\nFAILED to train model {config.name}:\n{traceback.format_exc()}"
+                )
+                print(error_msg)
+                failed_models.append((config.name, str(e)))
                 if wandb.run is not None:
                     wandb.finish(exit_code=1)
                 break
