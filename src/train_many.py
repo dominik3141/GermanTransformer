@@ -26,6 +26,7 @@ from typing import List
 import torch
 from src.train import train
 import configparser
+import wandb
 
 
 @dataclass
@@ -40,27 +41,48 @@ def get_max_batch_size(model_config: ModelConfig) -> int:
     """Finds the largest batch size that fits in memory for a given model configuration"""
     print(f"\nDetermining optimal batch size for model {model_config.name}...")
     test_batch_size = 1024
+    MAX_MEMORY_USAGE = 0.8  # Use only 80% of available GPU memory
+
+    # Get total GPU memory
+    total_memory = torch.cuda.get_device_properties(0).total_memory
 
     while test_batch_size > 1:
         print(f"Trying batch size: {test_batch_size}")
         try:
-            # Try training for just one batch with the current batch size
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
+
             train(
                 num_layers=model_config.num_layers,
                 num_heads=model_config.num_heads,
                 d_model=model_config.d_model,
                 batch_size=test_batch_size,
                 test=True,
-                max_batches=2,
-                learning_rate=0.000005,  # doesn't matter here
-                max_epochs=1,  # doesn't matter here
+                max_batches=10,
+                learning_rate=0.000005,
+                max_epochs=1,
                 dropout_rate=0.1,
                 patience=3,
                 min_delta=0.1,
                 nouns_path="data/nouns_clean.csv",
             )
-            print(f"Found optimal batch size: {test_batch_size}")
+
+            # Check memory usage
+            memory_used = torch.cuda.max_memory_allocated()
+            memory_usage_ratio = memory_used / total_memory
+
+            if memory_usage_ratio > MAX_MEMORY_USAGE:
+                print(
+                    f"Memory usage too high ({memory_usage_ratio:.1%}), reducing batch size..."
+                )
+                test_batch_size //= 2
+                continue
+
+            print(
+                f"Found optimal batch size: {test_batch_size} (memory usage: {memory_usage_ratio:.1%})"
+            )
             return test_batch_size
+
         except RuntimeError as e:
             if "out of memory" in str(e):
                 test_batch_size //= 2
@@ -127,6 +149,9 @@ def train_models() -> None:
             print(f"\nFAILED to train model {config.name}:")
             print(f"Error: {error_msg}")
             failed_models.append((config.name, error_msg))
+            # Ensure wandb run is finished if it was started
+            if wandb.run is not None:
+                wandb.finish()
             continue
 
     if failed_models:
