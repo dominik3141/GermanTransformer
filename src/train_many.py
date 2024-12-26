@@ -162,6 +162,7 @@ def train_models() -> None:
     dropout_rate = float(config["TRAINING"]["dropout_rate"])
     patience = int(config["TRAINING"]["patience"])
     min_delta = float(config["TRAINING"]["min_delta"])
+    val_ratio = float(config["TRAINING"]["val_ratio"])
 
     failed_models: List[tuple[str, str]] = []
 
@@ -191,6 +192,7 @@ def train_models() -> None:
                     dropout_rate=dropout_rate,
                     patience=patience,
                     min_delta=min_delta,
+                    val_ratio=val_ratio,
                 )
                 # If training succeeds, break the retry loop
                 break

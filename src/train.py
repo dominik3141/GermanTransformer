@@ -32,6 +32,7 @@ def train(
     max_batches: int | None = None,
     max_sequence_length: int = 512,
     num_classes: int = 3,
+    val_ratio: float = 0.1,
 ) -> None:
     """Trains the transformer model on German noun article classification"""
 
@@ -51,7 +52,7 @@ def train(
     # Load and split data
     nouns = load_nouns_from_csv(nouns_path)
     train_loader, val_loader = create_train_val_dataloaders(
-        nouns, batch_size=batch_size
+        nouns, batch_size=batch_size, val_ratio=val_ratio
     )
 
     # Initialize model, loss function, and optimizer
@@ -77,6 +78,8 @@ def train(
                 "patience": patience,
                 "min_delta": min_delta,
                 "num_parameters": num_params,
+                "num_train_examples": len(train_loader.dataset),
+                "num_val_examples": len(val_loader.dataset),
             },
         )
 
