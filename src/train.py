@@ -57,6 +57,10 @@ def train(
     # Initialize model, loss function, and optimizer
     device = torch.device("cuda" if torch.cuda.is_available() else "mps")
     model = TransformerEncoder(**model_params, dropout_rate=dropout_rate).to(device)
+
+    # Count parameters
+    num_params = sum(p.numel() for p in model.parameters())
+
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
@@ -72,6 +76,7 @@ def train(
                 "dropout_rate": dropout_rate,
                 "patience": patience,
                 "min_delta": min_delta,
+                "num_parameters": num_params,
             },
         )
 
@@ -263,9 +268,6 @@ def train(
 
         if not test:
             wandb.log({**train_metrics, **performance_metrics}, step=global_step)
-            # Save model with wandb
-            torch.save(model.state_dict(), f"checkpoints/model_epoch_{epoch}.pth")
-            wandb.save(f"checkpoints/model_epoch_{epoch}.pth")
 
         # After validation loop and metric calculation
         current_val_loss = val_loss / len(val_loader)
@@ -287,6 +289,11 @@ def train(
         # if test, break after first epoch
         if test:
             break
+
+    # Save final model if we completed all epochs without early stopping
+    if not test and patience_counter < patience:
+        torch.save(model.state_dict(), "checkpoints/final_model.pth")
+        wandb.save("checkpoints/final_model.pth")
 
     if not test:
         wandb.finish()

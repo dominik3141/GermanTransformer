@@ -29,8 +29,10 @@ from dataclasses import dataclass
 from typing import List
 import torch
 from src.train import train
+from src.nn import TransformerEncoder
 import configparser
 import wandb
+import math
 
 
 @dataclass
@@ -41,11 +43,12 @@ class ModelConfig:
     d_model: int
 
 
-def get_max_batch_size(model_config: ModelConfig) -> int:
-    """Finds the largest batch size that fits in memory for a given model configuration"""
+def get_model_stats(model_config: ModelConfig) -> tuple[int, int]:
+    """Finds the largest batch size that fits in memory and counts parameters"""
     print(f"\nDetermining optimal batch size for model {model_config.name}...")
     test_batch_size = 1024
     MAX_MEMORY_USAGE = 0.8  # Use only 80% of available GPU memory
+    n_params = 0
 
     # Get total GPU memory
     total_memory = torch.cuda.get_device_properties(0).total_memory
@@ -71,6 +74,19 @@ def get_max_batch_size(model_config: ModelConfig) -> int:
                 nouns_path="data/nouns_clean.csv",
             )
 
+            # instantiate the model to count parameters
+            model = TransformerEncoder(
+                num_layers=model_config.num_layers,
+                num_heads=model_config.num_heads,
+                d_model=model_config.d_model,
+                dropout_rate=0.1,
+                max_sequence_length=512,
+                num_classes=3,
+            )
+
+            # Count parameters
+            n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
             # Check memory usage
             memory_used = torch.cuda.max_memory_allocated()
             memory_usage_ratio = memory_used / total_memory
@@ -85,7 +101,7 @@ def get_max_batch_size(model_config: ModelConfig) -> int:
             print(
                 f"Found optimal batch size: {test_batch_size} (memory usage: {memory_usage_ratio:.1%})"
             )
-            return test_batch_size
+            return test_batch_size, n_params
 
         except RuntimeError as e:
             if "out of memory" in str(e):
@@ -94,7 +110,24 @@ def get_max_batch_size(model_config: ModelConfig) -> int:
                 print("Out of memory, reducing batch size...")
             else:
                 raise e
-    return 1
+    return 1, n_params
+
+
+def get_learning_rate(
+    config: ModelConfig, batch_size: int, n_params: int, base_lr: float = 5e-6
+) -> float:
+    """
+    Calculates learning rate based on both batch size and parameter count.
+    Uses linear scaling for batch size and square root scaling for parameters.
+    """
+    base_batch_size = 64
+    base_params = 2_000_000  # 2M parameters as reference
+
+    # Linear scaling with batch size, square root scaling with parameters
+    batch_scale = batch_size / base_batch_size
+    param_scale = math.sqrt(base_params / n_params)
+
+    return base_lr * batch_scale * param_scale
 
 
 def train_models() -> None:
@@ -131,8 +164,12 @@ def train_models() -> None:
         print(f"Training model: {config.name}")
         print(f"{'='*50}")
 
-        batch_size = get_max_batch_size(config)
-        learning_rate = base_lr * batch_size
+        batch_size, n_params = get_model_stats(config)
+        learning_rate = get_learning_rate(config, batch_size, n_params)
+
+        print(f"Model parameters: {n_params:,}")
+        print(f"Batch size: {batch_size}")
+        print(f"Learning rate: {learning_rate:.2e}")
 
         while batch_size >= 1:
             try:
