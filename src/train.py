@@ -63,6 +63,9 @@ def train(test: bool = False, debug: bool = False):
         # Log all model parameters every 50 steps
         wandb.watch(model, log="all", log_freq=50)
 
+    # Add a global step counter at the start of training
+    global_step = 0
+
     # Training loop
     for epoch in range(epochs):
         model.train()
@@ -109,12 +112,14 @@ def train(test: bool = False, debug: bool = False):
             loss.backward()
 
             if not test:
+                # Log training metrics with explicit step
                 wandb.log(
                     {
                         "train/loss": loss.item(),
                         "train/prediction_confidence": batch_confidence,
                         "train/prediction_diversity": pred_diversity,
-                    }
+                    },
+                    step=global_step,
                 )
 
             if test:
@@ -140,7 +145,8 @@ def train(test: bool = False, debug: bool = False):
                             / time_for_20_batches,
                             "performance/samples_per_minute": (20 * batch_size * 60.0)
                             / time_for_20_batches,
-                        }
+                        },
+                        step=global_step,
                     )
                 batch_start = time.time()  # Reset timer for next 20 batches
 
@@ -148,6 +154,32 @@ def train(test: bool = False, debug: bool = False):
             _, predicted = outputs.max(1)
             train_total += labels.size(0)
             train_correct += predicted.eq(labels).sum().item()
+
+            # Evaluate Nutella every 50 batches
+            if batch_count % 50 == 0:
+                model.eval()
+                with torch.no_grad():
+                    nutella_word = ["Nutella"]
+                    nutella_output = model(nutella_word)
+                    nutella_probs = nutella_output[0]
+
+                    nutella_metrics = {
+                        "nutella/masculine_prob": nutella_probs[0].item(),
+                        "nutella/feminine_prob": nutella_probs[1].item(),
+                        "nutella/neuter_prob": nutella_probs[2].item(),
+                    }
+
+                    if not test:
+                        wandb.log(nutella_metrics, step=global_step)
+                    else:
+                        print("\nNutella Predictions:")
+                        print(f"Masculine (der): {nutella_probs[0]:.4f}")
+                        print(f"Feminine (die): {nutella_probs[1]:.4f}")
+                        print(f"Neuter (das): {nutella_probs[2]:.4f}")
+                model.train()  # Switch back to training mode
+
+            # Update step counter after each batch
+            global_step += 1
 
         # Calculate epoch-level performance metrics
         epoch_time = time.time() - epoch_start
@@ -165,6 +197,7 @@ def train(test: bool = False, debug: bool = False):
         val_correct = 0
         val_total = 0
 
+        # Continue with existing validation loop
         with torch.no_grad():
             for words, labels in val_loader:
                 labels = labels.to(device)
@@ -186,7 +219,8 @@ def train(test: bool = False, debug: bool = False):
                         {
                             "val/prediction_confidence": batch_confidence,
                             "val/prediction_diversity": pred_diversity,
-                        }
+                        },
+                        step=global_step,  # Use same step as training
                     )
 
         # Print and log epoch statistics
@@ -209,7 +243,7 @@ def train(test: bool = False, debug: bool = False):
         )
 
         if not test:
-            wandb.log({**train_metrics, **performance_metrics})
+            wandb.log({**train_metrics, **performance_metrics}, step=global_step)
             # Save model with wandb
             torch.save(model.state_dict(), f"checkpoints/model_epoch_{epoch}.pth")
             wandb.save(f"checkpoints/model_epoch_{epoch}.pth")
