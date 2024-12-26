@@ -10,31 +10,46 @@ from src.nouns import load_nouns_from_csv, create_train_val_dataloaders
 import wandb
 import time
 
-config = configparser.ConfigParser()
-config.read("default.conf")
 
-
-def train(test: bool = False, debug: bool = False):
+def train(
+    # Model parameters
+    d_model: int,
+    num_heads: int,
+    num_layers: int,
+    # Training parameters
+    batch_size: int,
+    learning_rate: float,
+    max_epochs: int,
+    dropout_rate: float,
+    patience: int,
+    min_delta: float,
+    # Data parameters
+    nouns_path: str,
+    # Control flags
+    model_name: str | None = None,
+    test: bool = False,
+    debug: bool = False,
+    max_batches: int | None = None,
+    max_sequence_length: int = 512,
+    num_classes: int = 3,
+) -> None:
     """Trains the transformer model on German noun article classification"""
 
-    # Model parameters
+    # Model parameters dictionary for consistency
     model_params = {
-        "max_sequence_length": int(config["MODEL"]["max_sequence_length"]),
-        "d_model": int(config["MODEL"]["d_model"]),
-        "num_heads": int(config["MODEL"]["num_heads"]),
-        "num_layers": int(config["MODEL"]["num_layers"]),
-        "num_classes": 3,  # m, f, n
+        "max_sequence_length": max_sequence_length,
+        "d_model": d_model,
+        "num_heads": num_heads,
+        "num_layers": num_layers,
+        "num_classes": num_classes,
     }
 
-    # Training parameters
-    batch_size = int(config["TRAINING"]["batch_size"])
-    learning_rate = float(config["TRAINING"]["learning_rate"])
-    weight_decay = float(config["TRAINING"]["weight_decay"])
-    epochs = int(config["TRAINING"]["epochs"])
-    dropout_rate = float(config["TRAINING"]["dropout_rate"])
+    # Early stopping tracking variables
+    best_val_loss = float("inf")
+    patience_counter = 0
 
     # Load and split data
-    nouns = load_nouns_from_csv(config["DATA"]["nouns_path"])
+    nouns = load_nouns_from_csv(nouns_path)
     train_loader, val_loader = create_train_val_dataloaders(
         nouns, batch_size=batch_size
     )
@@ -43,20 +58,20 @@ def train(test: bool = False, debug: bool = False):
     device = torch.device("cuda" if torch.cuda.is_available() else "mps")
     model = TransformerEncoder(**model_params, dropout_rate=dropout_rate).to(device)
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(
-        model.parameters(), lr=learning_rate, weight_decay=weight_decay
-    )
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     if not test:
         wandb.init(
             project="german-articles",
+            name=model_name,
             config={
                 **model_params,
                 "batch_size": batch_size,
                 "learning_rate": learning_rate,
-                "weight_decay": weight_decay,
-                "epochs": epochs,
+                "epochs": max_epochs,
                 "dropout_rate": dropout_rate,
+                "patience": patience,
+                "min_delta": min_delta,
             },
         )
 
@@ -67,7 +82,7 @@ def train(test: bool = False, debug: bool = False):
     global_step = 0
 
     # Training loop
-    for epoch in range(epochs):
+    for epoch in range(max_epochs):
         model.train()
         train_loss = 0.0
         train_correct = 0
@@ -79,7 +94,7 @@ def train(test: bool = False, debug: bool = False):
         batch_start = time.time()
         batch_count = 0
 
-        for words, labels in train_loader:
+        for batch_idx, (words, labels) in enumerate(train_loader):
             labels = labels.to(device)
             optimizer.zero_grad()
 
@@ -181,6 +196,10 @@ def train(test: bool = False, debug: bool = False):
             # Update step counter after each batch
             global_step += 1
 
+            # Break early if we're testing and have reached max_batches
+            if test and max_batches and batch_idx >= max_batches - 1:
+                return
+
         # Calculate epoch-level performance metrics
         epoch_time = time.time() - epoch_start
         avg_batch_time = sum(batch_times) / len(batch_times)
@@ -232,7 +251,7 @@ def train(test: bool = False, debug: bool = False):
             "epoch": epoch + 1,
         }
 
-        print(f"Epoch [{epoch+1}/{epochs}]")
+        print(f"Epoch [{epoch+1}/{max_epochs}]")
         print(
             f"Train Loss: {train_metrics['train/loss']:.4f}, "
             f"Train Acc: {train_metrics['train/accuracy']:.2f}%"
@@ -248,6 +267,23 @@ def train(test: bool = False, debug: bool = False):
             torch.save(model.state_dict(), f"checkpoints/model_epoch_{epoch}.pth")
             wandb.save(f"checkpoints/model_epoch_{epoch}.pth")
 
+        # After validation loop and metric calculation
+        current_val_loss = val_loss / len(val_loader)
+
+        # Early stopping check
+        if current_val_loss < (best_val_loss - min_delta):
+            best_val_loss = current_val_loss
+            patience_counter = 0
+            # Save best model
+            if not test:
+                torch.save(model.state_dict(), "checkpoints/best_model.pth")
+                wandb.save("checkpoints/best_model.pth")
+        else:
+            patience_counter += 1
+            if patience_counter >= patience:
+                print(f"\nEarly stopping triggered after {epoch + 1} epochs")
+                break
+
         # if test, break after first epoch
         if test:
             break
@@ -257,4 +293,25 @@ def train(test: bool = False, debug: bool = False):
 
 
 if __name__ == "__main__":
-    train(debug=True)
+    config = configparser.ConfigParser()
+    config.read("default.conf")
+
+    train(
+        # Model parameters
+        max_sequence_length=int(config["MODEL"]["max_sequence_length"]),
+        d_model=int(config["MODEL"]["d_model"]),
+        num_heads=int(config["MODEL"]["num_heads"]),
+        num_layers=int(config["MODEL"]["num_layers"]),
+        num_classes=int(config["MODEL"]["num_classes"]),
+        # Training parameters
+        batch_size=int(config["TRAINING"]["batch_size"]),
+        learning_rate=float(config["TRAINING"]["learning_rate"]),
+        weight_decay=float(config["TRAINING"]["weight_decay"]),
+        max_epochs=int(config["TRAINING"]["epochs"]),
+        dropout_rate=float(config["TRAINING"]["dropout_rate"]),
+        patience=int(config["TRAINING"]["patience"]),
+        min_delta=float(config["TRAINING"]["min_delta"]),
+        # Data parameters
+        nouns_path=config["DATA"]["nouns_path"],
+        debug=True,
+    )

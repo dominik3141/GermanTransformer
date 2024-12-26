@@ -11,6 +11,7 @@ def model_params():
         "num_heads": 8,
         "num_layers": 6,
         "num_classes": 3,
+        "dropout_rate": 0.1,
     }
 
 
@@ -37,7 +38,9 @@ def test_attention_block_shape(model_params):
     batch_size = 2
     seq_length = 10
 
-    block = AttentionBlock(d_model, model_params["num_heads"])
+    block = AttentionBlock(
+        d_model, model_params["num_heads"], dropout_rate=model_params["dropout_rate"]
+    )
     x = torch.randn(batch_size, seq_length, d_model)
 
     output = block(x)
@@ -78,10 +81,11 @@ def test_attention_block_residual(model_params):
     batch_size = 2
     seq_length = 10
 
-    block = AttentionBlock(d_model, model_params["num_heads"])
+    block = AttentionBlock(
+        d_model, model_params["num_heads"], dropout_rate=model_params["dropout_rate"]
+    )
     x = torch.randn(batch_size, seq_length, d_model)
     x_copy = x.clone()
 
     output = block(x)
-    # Check that the output is different from the input (transformation happened)
     assert not torch.allclose(output, x_copy)
