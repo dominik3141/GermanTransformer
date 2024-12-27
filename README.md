@@ -6,7 +6,7 @@ A transformer model to predict the articles of German nouns.
 </p>
 
 ## Primary objective
-We build a BERT-like transformer model to predict the correct articles of German nouns.
+We build a encoder-only transformer model to predict the correct articles of German nouns.
 We try different sizes to determine the best size/accuracy tradeoff.
 
 ## Secondary objectives
